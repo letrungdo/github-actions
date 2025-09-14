@@ -1,0 +1,42 @@
+name: Checkout Backlog Git Repository
+description: Clone a Backlog (Nulab) Git repository via SSH only (simplified, secure). Generates a unique key file and cleans it up post-job.
+author: letrungdo
+branding:
+  icon: git-branch
+  color: blue
+
+inputs:
+  repo-url:
+    description: "Full SSH repository URL (e.g. space@space.git.backlog.com:/PROJECT_KEY/repo.git)"
+    required: true
+  ssh-private-key:
+    description: "Private SSH key (PEM/OpenSSH, multiline secret) for clone"
+    required: true
+  branch:
+    description: "Optional branch to checkout"
+    required: false
+    default: ""
+  depth:
+    description: "Shallow clone depth (leave empty for full clone)"
+    required: false
+    default: ""
+  dest:
+    description: "Destination folder name. Use '.' ONLY if workspace is otherwise empty."
+    required: false
+    default: "backlog-repo"
+  force-clean:
+    description: "If 'true' and destination exists (or '.' has contents), aggressively delete existing contents before cloning. DANGEROUS with '.' because it wipes the workspace."
+    required: false
+    default: "true"
+
+runs:
+  using: node20
+  main: dist/index.js
+  post: dist/post.js
+  post-if: always()
+
+outputs:
+  repo-path:
+    description: "Relative path where the Backlog repository was cloned"
+  commit-sha:
+    description: "The HEAD commit SHA of the cloned repository"

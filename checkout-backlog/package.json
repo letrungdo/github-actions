@@ -1,0 +1,27 @@
+{
+  "name": "checkout-backlog",
+  "version": "2.0.0",
+  "private": true,
+  "description": "GitHub Action: Checkout Backlog repository over SSH",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build:ts": "tsc -p .",
+    "build:bundle": "esbuild dist/index.js --bundle --platform=node --target=node20 --outfile=dist/index.bundle.js --banner:js=\"// bundled by esbuild\" && mv dist/index.bundle.js dist/index.js && esbuild dist/post.js --bundle --platform=node --target=node20 --outfile=dist/post.bundle.js --banner:js=\"// bundled by esbuild\" && mv dist/post.bundle.js dist/post.js",
+    "build": "npm run build:ts && npm run build:bundle",
+    "prepare": "npm run build"
+  },
+  "dependencies": {
+    "@actions/core": "^1.11.1",
+    "@actions/exec": "^1.1.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "@types/node": "^20.11.0",
+    "esbuild": "^0.23.0"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT"
+}
