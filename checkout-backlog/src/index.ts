@@ -13,6 +13,11 @@ async function run() {
     const depth = core.getInput("depth");
     const dest = core.getInput("dest") || "backlog-repo";
     const forceClean = core.getInput("force-clean") === "true";
+
+    core.info(
+      `[checkout-backlog] Inputs: branch="${branch}", dest="${dest}", force-clean=${forceClean}, depth="${depth}"`
+    );
+
     // Save raw dest input early for post cleanup logic
     core.saveState("clone-dest-input", dest);
 
@@ -35,22 +40,43 @@ async function run() {
     if (dest === ".") {
       const cwd = process.cwd();
       const entries = (
-        await fs.readdir(cwd).catch(() => [] as string[])
-      ).filter((n) => ![".", ".."].includes(n));
-      if (entries.length > 0) {
+        await fs.readdir(cwd, { withFileTypes: true }).catch(() => [])
+      ).filter((n) => ![".", ".."].includes(n.name));
+
+      // Check if .git directory exists (hidden files)
+      const gitExists = await pathExists(path.join(cwd, ".git"));
+
+      if (entries.length > 0 || gitExists) {
         if (forceClean) {
           core.warning(
-            "[checkout-backlog] force-clean=true and dest='.'; deleting ALL existing workspace entries before clone."
+            "[checkout-backlog] force-clean=true and dest='.'; deleting ALL existing workspace entries (including .git) before clone."
           );
-          for (const name of entries) {
+
+          // First, remove .git directory explicitly to ensure clean state
+          if (gitExists) {
             try {
-              await fs.rm(path.join(cwd, name), {
+              core.info("[checkout-backlog] Removing existing .git directory");
+              await fs.rm(path.join(cwd, ".git"), {
                 recursive: true,
                 force: true,
               });
             } catch (e: any) {
               core.warning(
-                `[checkout-backlog] Failed to remove workspace entry ${name}: ${e.message}`
+                `[checkout-backlog] Failed to remove .git directory: ${e.message}`
+              );
+            }
+          }
+
+          // Then remove all other entries
+          for (const entry of entries) {
+            try {
+              await fs.rm(path.join(cwd, entry.name), {
+                recursive: true,
+                force: true,
+              });
+            } catch (e: any) {
+              core.warning(
+                `[checkout-backlog] Failed to remove workspace entry ${entry.name}: ${e.message}`
               );
             }
           }
@@ -219,14 +245,48 @@ async function run() {
     core.exportVariable("GIT_SSH_COMMAND", gitSshCommand);
     core.info(`[checkout-backlog] Using ephemeral SSH key file ${keyFile}`);
 
+    // Configure git to use SSH instead of HTTPS for Backlog
+    // This allows flutter pub get and other git operations to work with private repos
+    if (host) {
+      try {
+        // Extract SSH prefix: guide@guide.git.backlog.com:
+        const sshMatch = cloneUrl.match(/^([^@]+@[^:]+:)/);
+        if (!sshMatch) {
+          throw new Error("Could not extract SSH prefix from repo-url");
+        }
+        const sshPrefix = sshMatch[1];
+
+        // Convert guide.git.backlog.com -> guide.backlog.com for HTTPS
+        // Some Backlog instances use .git. subdomain for SSH but not for HTTPS
+        const httpsHost = host.replace(/\.git\./, ".");
+        const httpsPrefix = `https://${httpsHost}/git/`;
+
+        core.info(
+          `[checkout-backlog] Configuring git URL rewriting: ${httpsPrefix} -> ${sshPrefix}`
+        );
+
+        await exec.exec("git", [
+          "config",
+          "--global",
+          `url.${sshPrefix}.insteadOf`,
+          httpsPrefix,
+        ]);
+      } catch (e: any) {
+        core.warning(
+          `[checkout-backlog] Failed to configure git insteadOf: ${e.message}`
+        );
+      }
+    }
+
     // No pre-clone cleanup (workspace may retain previous artifacts until post step wipes it)
     const cloneArgs = ["clone"];
     if (depth) cloneArgs.push("--depth", depth);
     if (branch) cloneArgs.push("--branch", branch, "--single-branch");
     cloneArgs.push(cloneUrl, dest);
-    core.info(
-      `[checkout-backlog] Cloning ${cloneUrl.replace(/:.*/, ":***")} (SSH)`
-    );
+    const cloneMsg = branch
+      ? `Cloning ${cloneUrl.replace(/:.*/, ":***")} (branch: ${branch})`
+      : `Cloning ${cloneUrl.replace(/:.*/, ":***")}`;
+    core.info(`[checkout-backlog] ${cloneMsg}`);
     await exec.exec("git", cloneArgs);
 
     await exec
@@ -240,11 +300,34 @@ async function run() {
       .catch(() => {});
 
     // Outputs
+    const absoluteDest =
+      dest === "." ? process.cwd() : path.join(process.cwd(), dest);
     core.setOutput("repo-path", dest);
-    core.saveState("clone-dest-path", path.join(process.cwd(), dest));
+    core.saveState("clone-dest-path", absoluteDest);
+
+    // Log current branch name
+    try {
+      let branchName = "";
+      await exec.exec("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+        cwd: absoluteDest,
+        listeners: {
+          stdout: (data: any) => {
+            branchName += data.toString();
+          },
+        },
+      });
+      branchName = branchName.trim();
+      if (branchName) {
+        core.setOutput("branch-name", branchName);
+      }
+    } catch (e: any) {
+      core.warning(`Could not determine branch name: ${e.message}`);
+    }
+
     try {
       let sha = "";
-      await exec.exec("bash", ["-c", `git -C "${dest}" rev-parse HEAD`], {
+      await exec.exec("git", ["rev-parse", "HEAD"], {
+        cwd: absoluteDest,
         listeners: {
           stdout: (data: any) => {
             sha += data.toString();
@@ -252,7 +335,9 @@ async function run() {
         },
       });
       sha = sha.trim();
-      if (sha) core.setOutput("commit-sha", sha);
+      if (sha) {
+        core.setOutput("commit-sha", sha);
+      }
     } catch {
       core.warning("Could not determine commit SHA");
     }
