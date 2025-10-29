@@ -289,19 +289,22 @@ async function run() {
     core.info(`[checkout-backlog] ${cloneMsg}`);
     await exec.exec("git", cloneArgs);
 
-    await exec
-      .exec("git", [
-        "config",
-        "--global",
-        "--add",
-        "safe.directory",
-        path.join(process.cwd(), dest),
-      ])
-      .catch(() => {});
-
     // Outputs
     const absoluteDest =
       dest === "." ? process.cwd() : path.join(process.cwd(), dest);
+
+    // Use --local instead of --global to avoid polluting runner's global .gitconfig
+    await exec
+      .exec("git", [
+        "config",
+        "--local",
+        "--add",
+        "safe.directory",
+        path.join(process.cwd(), dest),
+      ], {
+        cwd: absoluteDest,
+      })
+      .catch(() => {});
     core.setOutput("repo-path", dest);
     core.saveState("clone-dest-path", absoluteDest);
 

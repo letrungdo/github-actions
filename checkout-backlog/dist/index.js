@@ -20022,15 +20022,17 @@ async function run() {
     const cloneMsg = branch ? `Cloning ${cloneUrl.replace(/:.*/, ":***")} (branch: ${branch})` : `Cloning ${cloneUrl.replace(/:.*/, ":***")}`;
     core.info(`[checkout-backlog] ${cloneMsg}`);
     await exec.exec("git", cloneArgs);
+    const absoluteDest = dest === "." ? process.cwd() : path.join(process.cwd(), dest);
     await exec.exec("git", [
       "config",
-      "--global",
+      "--local",
       "--add",
       "safe.directory",
       path.join(process.cwd(), dest)
-    ]).catch(() => {
+    ], {
+      cwd: absoluteDest
+    }).catch(() => {
     });
-    const absoluteDest = dest === "." ? process.cwd() : path.join(process.cwd(), dest);
     core.setOutput("repo-path", dest);
     core.saveState("clone-dest-path", absoluteDest);
     try {
